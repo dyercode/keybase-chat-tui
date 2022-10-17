@@ -3,19 +3,19 @@
 // A client struct which talks to the Keybase API, handles serialization and deserialization of the
 // messages and writing to the proper channels.
 
-use std::process::{Stdio};
 use std::error::Error;
+use std::process::Stdio;
 
-use tokio::process::{Child, Command};
-use tokio::io::{BufReader, AsyncWriteExt, AsyncBufReadExt};
-use tokio::sync::mpsc::{self, Sender, Receiver};
-use serde_json::{from_str, from_value, json, to_string_pretty, Value};
 use async_trait::async_trait;
 #[cfg(test)]
 use mockall::*;
+use serde_json::{from_str, from_value, json, to_string_pretty, Value};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::types::{
-    Message, ApiResponseWrapper, ApiResponse, Channel, KeybaseConversation, ListenerEvent,
+    ApiResponse, ApiResponseWrapper, Channel, KeybaseConversation, ListenerEvent, Message,
 };
 
 #[cfg_attr(test, automock)]
@@ -23,14 +23,22 @@ use crate::types::{
 pub trait KeybaseClient {
     fn get_receiver(&mut self) -> Receiver<ListenerEvent>;
     async fn fetch_conversations(&self) -> Result<Vec<KeybaseConversation>, Box<dyn Error>>;
-    async fn fetch_messages(&self, conversation: &KeybaseConversation, count: u32) -> Result<Vec<Message>, Box<dyn Error>>;
-    async fn send_message<T: Into<String> + Send + 'static>(&self, channel: &Channel, message: T) -> Result<(), Box<dyn Error>>;
+    async fn fetch_messages(
+        &self,
+        conversation: &KeybaseConversation,
+        count: u32,
+    ) -> Result<Vec<Message>, Box<dyn Error>>;
+    async fn send_message<T: Into<String> + Send + 'static>(
+        &self,
+        channel: &Channel,
+        message: T,
+    ) -> Result<(), Box<dyn Error>>;
 }
 
 pub struct Client<Executor: KeybaseExecutor> {
     receiver: Option<Receiver<ListenerEvent>>,
     subscriber: Option<Sender<ListenerEvent>>,
-    listener: Option<Child>, 
+    listener: Option<Child>,
     executor: Executor,
 }
 
@@ -43,35 +51,45 @@ impl Default for Client<ClientExecutor> {
 impl<Executor: KeybaseExecutor> Drop for Client<Executor> {
     fn drop(&mut self) {
         if let Some(mut c) = self.listener.take() {
-            c.kill().unwrap()
+            c.start_kill()
+                .expect("couldn't start to kill child process");
+            c.try_wait().expect("child didn't die");
         }
     }
 }
 
 #[async_trait]
 impl<Executor: KeybaseExecutor + Send + Sync + 'static> KeybaseClient for Client<Executor> {
-
-    fn get_receiver(&mut self) -> Receiver<ListenerEvent>{
+    fn get_receiver(&mut self) -> Receiver<ListenerEvent> {
         self.receiver.take().unwrap()
     }
 
     async fn fetch_conversations(&self) -> Result<Vec<KeybaseConversation>, Box<dyn Error>> {
-        let value = self.executor.run_api_command(
-            json!({
+        let value = self
+            .executor
+            .run_api_command(json!({
                 "method": "list"
-            }),
-        ).await?;
+            }))
+            .await?;
         let parsed = from_value::<ApiResponseWrapper>(value)?.result;
-        if let ApiResponse::ConversationList { conversations: convos } = parsed {
+        if let ApiResponse::ConversationList {
+            conversations: convos,
+        } = parsed
+        {
             return Ok(convos);
         }
         // should be an Err
         Ok(vec![])
     }
 
-    async fn fetch_messages(&self, conversation: &KeybaseConversation, count: u32) -> Result<Vec<Message>, Box<dyn Error>>{
-        let value = self.executor.run_api_command(
-            json!({
+    async fn fetch_messages(
+        &self,
+        conversation: &KeybaseConversation,
+        count: u32,
+    ) -> Result<Vec<Message>, Box<dyn Error>> {
+        let value = self
+            .executor
+            .run_api_command(json!({
                 "method": "read",
                 "params": {
                     "options": {
@@ -79,8 +97,8 @@ impl<Executor: KeybaseExecutor + Send + Sync + 'static> KeybaseClient for Client
                         "pagination": {"num": count}
                     }
                 }
-            }),
-        ).await?;
+            }))
+            .await?;
         let parsed = from_value::<ApiResponseWrapper>(value)?.result;
         if let ApiResponse::MessageList { messages: wrapper } = parsed {
             return Ok(wrapper.into_iter().map(|m| m.msg).collect::<Vec<Message>>());
@@ -89,9 +107,13 @@ impl<Executor: KeybaseExecutor + Send + Sync + 'static> KeybaseClient for Client
         Ok(vec![])
     }
 
-    async fn send_message<T: Into<String> + Send>(&self, channel: &Channel, message: T) -> Result<(), Box<dyn Error>> {
-        self.executor.run_api_command(
-            json!({
+    async fn send_message<T: Into<String> + Send>(
+        &self,
+        channel: &Channel,
+        message: T,
+    ) -> Result<(), Box<dyn Error>> {
+        self.executor
+            .run_api_command(json!({
                 "method": "send",
                 "params": {
                     "options": {
@@ -99,21 +121,20 @@ impl<Executor: KeybaseExecutor + Send + Sync + 'static> KeybaseClient for Client
                         "message": {"body": message.into()}
                     }
                 }
-            }),
-        ).await?;
+            }))
+            .await?;
         Ok(())
     }
-
 }
 
 impl<Executor: KeybaseExecutor> Client<Executor> {
     pub fn new(executor: Executor) -> Self {
         let (s, r) = mpsc::channel(32);
         let mut c = Client {
-            receiver: Some(r), 
+            receiver: Some(r),
             subscriber: Some(s),
-            listener: None, 
-            executor
+            listener: None,
+            executor,
         };
         c.listener = Some(c.start_listener().unwrap());
         c
@@ -126,10 +147,10 @@ impl<Executor: KeybaseExecutor> Client<Executor> {
             .stdout(Stdio::piped())
             .spawn()?;
 
-        debug!("Started listener process: {}", child.id());
+        debug!("Started listener process: {:?}", child.id());
 
         let stdout = child.stdout.take().unwrap();
-        let mut subscriber = self.subscriber.clone().unwrap();
+        let subscriber = self.subscriber.clone().unwrap();
 
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -171,9 +192,11 @@ impl KeybaseExecutor for ClientExecutor {
 
             info!("Sending Keybase Command");
             debug!("Keybase Command: {}", to_string_pretty(&command)?);
-            stdin.write_all(serde_json::to_vec(&command)?.as_slice()).await.unwrap();
+            stdin
+                .write_all(serde_json::to_vec(&command)?.as_slice())
+                .await
+                .unwrap();
         }
-
 
         let output = child.wait_with_output().await?;
 
@@ -184,63 +207,60 @@ impl KeybaseExecutor for ClientExecutor {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{message, conversation};
     use crate::types::*;
+    use crate::{conversation, message};
 
     #[tokio::test]
     async fn fetch_list() {
         let convos = vec![conversation!("test1"), conversation!("test2")];
         let mut executor = MockKeybaseExecutor::new();
-        executor.expect_run_api_command()
-            .times(1)
-            .return_once(|_| {
-                Ok(json!({
-                    "result": {
-                        "conversations": [
-                        {
-                            "id": "test1",
-                            "active_at": 1,
-                            "active_at_ms": 1000,
-                            "channel": {
-                                "members_type": "impteamnative",
-                                "name": "channel",
-                                "topic_type": "chat"
-                            },
-                            "creator_info": {
-                                "ctime": 1,
-                                "username": "test"
-                            },
-                            "unread": false,
-                            "member_status": "active",
-                            "is_default_conv": false
-
+        executor.expect_run_api_command().times(1).return_once(|_| {
+            Ok(json!({
+                "result": {
+                    "conversations": [
+                    {
+                        "id": "test1",
+                        "active_at": 1,
+                        "active_at_ms": 1000,
+                        "channel": {
+                            "members_type": "impteamnative",
+                            "name": "channel",
+                            "topic_type": "chat"
                         },
-                        {
-                            "id": "test2",
-                            "active_at": 1,
-                            "active_at_ms": 1000,
-                            "channel": {
-                                "members_type": "impteamnative",
-                                "name": "channel",
-                                "topic_type": "chat"
-                            },
-                            "creator_info": {
-                                "ctime": 1,
-                                "username": "test"
-                            },
-                            "unread": false,
-                            "member_status": "active",
-                            "is_default_conv": false
+                        "creator_info": {
+                            "ctime": 1,
+                            "username": "test"
+                        },
+                        "unread": false,
+                        "member_status": "active",
+                        "is_default_conv": false
 
-                        }
-                        ]
+                    },
+                    {
+                        "id": "test2",
+                        "active_at": 1,
+                        "active_at_ms": 1000,
+                        "channel": {
+                            "members_type": "impteamnative",
+                            "name": "channel",
+                            "topic_type": "chat"
+                        },
+                        "creator_info": {
+                            "ctime": 1,
+                            "username": "test"
+                        },
+                        "unread": false,
+                        "member_status": "active",
+                        "is_default_conv": false
+
                     }
-                }))
-            });
+                    ]
+                }
+            }))
+        });
 
         let client = Client::new(executor);
 
@@ -250,45 +270,43 @@ mod test {
     #[tokio::test]
     async fn fetch_messages() {
         let mut executor = MockKeybaseExecutor::new();
-        executor.expect_run_api_command()
-            .times(1)
-            .return_once(|_| {
-                Ok(json!({
-                    "result": {
-                        "messages": [
-                        {
-                            "msg": {
-                                "id": "msg_id",
-                                "conversation_id": "test1", 
-                                "channel": {
-                                    "members_type": "impteamnative",
-                                    "name": "channel",
-                                    "topic_type": "chat"
+        executor.expect_run_api_command().times(1).return_once(|_| {
+            Ok(json!({
+                "result": {
+                    "messages": [
+                    {
+                        "msg": {
+                            "id": "msg_id",
+                            "conversation_id": "test1",
+                            "channel": {
+                                "members_type": "impteamnative",
+                                "name": "channel",
+                                "topic_type": "chat"
+                            },
+                            "content": {
+                                "text": {
+                                    "body": "hi"
                                 },
-                                "content": {
-                                    "text": {
-                                        "body": "hi"
-                                    },
-                                    "type": "text"
-                                },
-                                "sender": {
-                                    "device_id": "1",
-                                    "device_name": "My Device",
-                                    "uid": "1",
-                                    "username": "Some Guy"
-                                },
-                                "unread": false
-                            }
-                        },
-                        ],
-                        "pagination": {
-                            "next": "next",
-                            "num": 1,
-                            "previous": "prev"
+                                "type": "text"
+                            },
+                            "sender": {
+                                "device_id": "1",
+                                "device_name": "My Device",
+                                "uid": "1",
+                                "username": "Some Guy"
+                            },
+                            "unread": false
                         }
+                    },
+                    ],
+                    "pagination": {
+                        "next": "next",
+                        "num": 1,
+                        "previous": "prev"
                     }
-                }))
-            });
+                }
+            }))
+        });
 
         let client = Client::new(executor);
 
@@ -311,7 +329,8 @@ mod test {
             }
         });
         let mut executor = MockKeybaseExecutor::new();
-        executor.expect_run_api_command()
+        executor
+            .expect_run_api_command()
             .withf(move |value: &Value| *value == my_value)
             .times(1)
             .return_once(move |_| Ok(Value::Null));
@@ -320,4 +339,3 @@ mod test {
         client.send_message(&convo.channel, "hi").await.unwrap();
     }
 }
-

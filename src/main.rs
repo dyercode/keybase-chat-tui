@@ -6,7 +6,10 @@
 #[macro_use]
 extern crate log;
 
-use tokio::time::{delay_for, Duration, Instant};
+use crate::client::{Client, ClientExecutor};
+use crate::controller::Controller;
+use crate::state::{ApplicationState, ApplicationStateInner};
+use crate::ui::{UiBuilder, UiObserver};
 
 mod client;
 mod controller;
@@ -16,11 +19,6 @@ mod ui;
 mod views;
 #[macro_use]
 mod macros;
-
-use crate::client::{ClientExecutor, Client};
-use crate::controller::Controller;
-use crate::state::{ApplicationState, ApplicationStateInner};
-use crate::ui::UiBuilder;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,31 +34,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting...");
 
     // The UI object has all of the cursive (rust tui library) logic.
-    let (ui, ui_recv) = UiBuilder::new().build();
+    let (mut ui, ui_recv, ui_sender) = UiBuilder::new().build();
     let mut state = ApplicationStateInner::default();
 
-    state.register_observer(Box::new(ui.clone()));
+    state.register_observer(Box::new(UiObserver { sender: ui_sender }));
     let client = Client::<ClientExecutor>::default();
     let mut controller = Controller::new(client, state, ui_recv);
 
     controller.init().await?;
 
     tokio::select! {
-        _ = controller.process_events() => {}
-        _ = async {
-            let mut next_frame = Instant::now() + Duration::from_millis(16);
-            loop {
-                let now = Instant::now();
-                if now < next_frame {
-                    delay_for(next_frame - now).await;
-                }
-                if !ui.borrow_mut().step() {
-                    break
-                }
-                next_frame = Instant::now() + Duration::from_millis(16);
-
-            }
-        } => { info!("Exiting."); }
+        _ = controller.process_events() => { info!("Exiting from process events")}
+        _ = ui.run() => { info!("Exiting from cursive."); }
     }
     Ok(())
 }

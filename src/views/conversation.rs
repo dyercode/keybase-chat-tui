@@ -1,7 +1,8 @@
 use cursive::align::Align;
 use cursive::direction::Direction;
+use cursive::event::EventResult;
 use cursive::theme::ColorStyle;
-use cursive::view::{View, ViewWrapper};
+use cursive::view::{CannotFocus, View, ViewWrapper};
 use cursive::{Printer, Vec2};
 
 use crate::types::Conversation;
@@ -73,12 +74,12 @@ impl View for ConversationView {
         })
     }
 
-    fn take_focus(&mut self, _: Direction) -> bool {
-        self.unread = false;
-        true
-    }
-
     fn required_size(&mut self, _: Vec2) -> Vec2 {
         Vec2::new((self.name().len() + 1).min(MAX_NAME_LENGTH), 1)
+    }
+
+    fn take_focus(&mut self, _: Direction) -> Result<cursive::event::EventResult, CannotFocus> {
+        self.unread = false;
+        Ok(EventResult::Ignored)
     }
 }

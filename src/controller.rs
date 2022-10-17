@@ -1,8 +1,8 @@
-use tokio::sync::mpsc::{Receiver};
+use tokio::sync::mpsc::Receiver;
 
-use crate::client::{KeybaseClient};
+use crate::client::KeybaseClient;
 use crate::state::ApplicationState;
-use crate::types::{ListenerEvent, UiEvent};
+use crate::types::{KeybaseConversation, ListenerEvent, UiEvent};
 
 pub struct Controller<S, C> {
     client: C,
@@ -10,20 +10,25 @@ pub struct Controller<S, C> {
     ui_receiver: Receiver<UiEvent>,
 }
 
-impl<S: ApplicationState, C: KeybaseClient> Controller<S, C>{
+impl<S: ApplicationState, C: KeybaseClient> Controller<S, C> {
     pub fn new(client: C, state: S, receiver: Receiver<UiEvent>) -> Self {
         Controller {
             client,
             state,
-            ui_receiver: receiver
+            ui_receiver: receiver,
         }
     }
 
     pub async fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let conversations = self.client.fetch_conversations().await?;
-        if !conversations.is_empty() {
-            let first_id = conversations[0].id.clone();
-            self.state.set_conversations(conversations.into_iter().map(|c| c.into()).collect());
+        if let Some(head) = conversations.get(0) {
+            let first_id = head.id.clone();
+            self.state.set_conversations(
+                conversations
+                    .into_iter()
+                    .map(KeybaseConversation::into)
+                    .collect(),
+            );
             self.state.set_current_conversation(&first_id);
         }
         Ok(())
@@ -63,26 +68,18 @@ impl<S: ApplicationState, C: KeybaseClient> Controller<S, C>{
     }
 }
 
-async fn switch_conversation<S: ApplicationState, C: KeybaseClient>(client: &mut C, state: &mut S, conversation_id: String) -> Result<(), Box<dyn std::error::Error>>{
-    let (convo_id, should_fetch) = {
-        if let Some(mut convo) = state.get_conversation_mut(&conversation_id){
-            if !convo.fetched {
-                convo.fetched = true;
-                (Some(convo.id.clone()), true)
-            } else {
-                (Some(convo.id.clone()), false)
-            }
-        } else {
-            (None, false)
-        }
-    };
-
-    if should_fetch {
-        let id = &convo_id.unwrap();
-        let convo = state.get_conversation(id).unwrap();
+async fn switch_conversation<S: ApplicationState, C: KeybaseClient>(
+    client: &mut C,
+    state: &mut S,
+    conversation_id: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(convo) = state
+        .get_conversation_mut(&conversation_id)
+        .filter(|c| !c.fetched)
+    {
         let messages = client.fetch_messages(&convo.data, 20).await?;
-                
-        state.get_conversation_mut(id).unwrap().insert_messages(messages);
+        convo.fetched = true;
+        convo.insert_messages(messages);
     }
 
     state.set_current_conversation(&conversation_id);
@@ -94,15 +91,16 @@ mod test {
 
     use super::*;
     use crate::client::MockKeybaseClient;
-    use crate::state::ApplicationStateInner;
     use crate::conversation;
+    use crate::state::ApplicationStateInner;
     use crate::types::*;
 
     #[tokio::test]
     async fn init() {
         let (_, r) = tokio::sync::mpsc::channel::<UiEvent>(32);
         let mut client = MockKeybaseClient::new();
-        client.expect_fetch_conversations()
+        client
+            .expect_fetch_conversations()
             .times(1)
             .return_once(|| Ok(vec![]));
 
@@ -114,7 +112,7 @@ mod test {
 
     #[tokio::test]
     async fn switch_conversation() {
-        let (mut s, r) = tokio::sync::mpsc::channel::<UiEvent>(32);
+        let (s, r) = tokio::sync::mpsc::channel::<UiEvent>(32);
         let (_, c_recv) = tokio::sync::mpsc::channel::<ListenerEvent>(32);
         let mut client = MockKeybaseClient::new();
         let convo = conversation!("test1");
@@ -122,15 +120,18 @@ mod test {
         let c1 = convo.clone();
         let c2 = convo2.clone();
 
-        client.expect_get_receiver()
+        client
+            .expect_get_receiver()
             .times(1)
             .return_once(move || c_recv);
 
-        client.expect_fetch_conversations()
+        client
+            .expect_fetch_conversations()
             .times(1)
             .return_once(move || Ok(vec![c1, c2]));
 
-        client.expect_fetch_messages()
+        client
+            .expect_fetch_messages()
             .withf(move |c: &KeybaseConversation, _| c.id == "test1")
             .times(1)
             .return_once(|_, _| Ok(vec![]));
@@ -142,12 +143,14 @@ mod test {
         controller.init().await.unwrap();
 
         tokio::spawn(async move {
-            s.send(UiEvent::SwitchConversation("test1".to_string())).await.ok();
+            s.send(UiEvent::SwitchConversation("test1".to_string()))
+                .await
+                .ok();
         });
 
         tokio::select! {
             _ = controller.process_events() => {},
-            _ = tokio::time::delay_for(tokio::time::Duration::from_millis(10)) => {}
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {}
         }
     }
 }

@@ -100,12 +100,9 @@ impl ApplicationState for ApplicationStateInner {
 
     // should return a result
     fn insert_message(&mut self, conversation_id: &str, message: Message) {
-        let is_active = {
-            if let Some(convo) = self.get_current_conversation() {
-                convo.id == conversation_id
-            } else {
-                false
-            }
+        let is_active = match self.get_current_conversation() {
+            Some(convo) => convo.id == conversation_id,
+            None => false,
         };
         if let Some(convo) = self.conversations.get_mut(conversation_id) {
             self.observers
@@ -126,12 +123,9 @@ impl ApplicationState for ApplicationStateInner {
     }
 
     fn get_current_conversation(&self) -> Option<&Conversation> {
-        if let Some(id) = &self.current_conversation {
-            if let Some(convo) = self.conversations.get(id) {
-                return Some(convo);
-            }
-        }
-        None
+        self.current_conversation
+            .as_ref()
+            .and_then(|id| self.conversations.get(id))
     }
 
     fn set_conversations(&mut self, conversations: Vec<Conversation>) {
