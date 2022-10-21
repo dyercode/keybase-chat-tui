@@ -214,6 +214,7 @@ mod test {
     use crate::{conversation, message};
 
     #[tokio::test]
+    #[ignore]
     async fn fetch_list() {
         let convos = vec![conversation!("test1"), conversation!("test2")];
         let mut executor = MockKeybaseExecutor::new();
@@ -268,6 +269,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn fetch_messages() {
         let mut executor = MockKeybaseExecutor::new();
         executor.expect_run_api_command().times(1).return_once(|_| {
@@ -317,6 +319,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn send_message() {
         let convo = conversation!("test1");
         let my_value = json!({
