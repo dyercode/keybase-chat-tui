@@ -16,9 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
+    - name: Toolchain
+      run: rustup override set nightly
     - name: Build
       run: cargo build --verbose
     - name: Run tests
