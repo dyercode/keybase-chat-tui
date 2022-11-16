@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/product.schema.json",
+  "title": "MessageList",
+  "description": "A product from Acme's catalog",
+  "type": "object",
+  "properties": {
+    "result": {
+      "description": "an object wrapper for messageList",
+      "type": "object",
+      "properties": {
+        "messages": {
+          "description": "array of messages",
+          "type": "array,",
+          "items": {
+            "type": "object",
+            "properties": {
+              "msg": {
+                "description": "a message",
+                "type": "object",
+                "properties": {
+                  "channel": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "topic_name": {
+                        "type": "string"
+                      },
+                      "members_type": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "content": {},
+                "sender": {},
+                "conversation_id": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "result"
+  ]
+}

@@ -87,6 +87,7 @@ impl<Executor: KeybaseExecutor + Send + Sync + 'static> KeybaseClient for Client
         conversation: &KeybaseConversation,
         count: u32,
     ) -> Result<Vec<Message>, Box<dyn Error>> {
+        info!("running api command");
         let value = self
             .executor
             .run_api_command(json!({
@@ -99,8 +100,17 @@ impl<Executor: KeybaseExecutor + Send + Sync + 'static> KeybaseClient for Client
                 }
             }))
             .await?;
-        let parsed = from_value::<ApiResponseWrapper>(value)?.result;
-        if let ApiResponse::MessageList { messages: wrapper } = parsed {
+
+        let vs = value.to_string();
+        let js = &mut serde_json::Deserializer::from_str(&vs);
+        let parsed: Result<ApiResponseWrapper, _> = serde_path_to_error::deserialize(js);
+        info!("api response {}", serde_json::to_string(&value).unwrap());
+
+        // let parsed = from_value::<ApiResponseWrapper>(value);
+        info!("serde error {:?}", parsed);
+        let api_response = parsed?.result;
+        info!("returning responess.");
+        if let ApiResponse::MessageList { messages: wrapper } = api_response {
             return Ok(wrapper.into_iter().map(|m| m.msg).collect::<Vec<Message>>());
         }
         // should be an Err

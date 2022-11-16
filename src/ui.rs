@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use anyhow::{anyhow, Result};
 use cursive::{event::*, view::*, views::*, CbSink, Cursive, CursiveRunnable};
 use dirs::config_dir;
 use log::debug;
@@ -109,8 +110,9 @@ fn render_message(view: &mut TextView, message: &Message) {
 pub struct UiObserver {
     pub sender: CbSink,
 }
+
 impl StateObserver for UiObserver {
-    fn on_conversation_change(&mut self, data: &Conversation) {
+    fn on_conversation_change(&mut self, data: &Conversation) -> Result<(), anyhow::Error> {
         let name = data.get_name();
         let messages: Vec<Message> = data.messages.iter().rev().cloned().collect();
         self.sender
@@ -126,7 +128,7 @@ impl StateObserver for UiObserver {
                 });
                 cursive.focus_name("edit").unwrap();
             }))
-            .unwrap();
+            .map_err(|_| anyhow!("error sent back, but it's poison"))
     }
 
     fn on_conversations_added(&mut self, data: &[Conversation]) {
@@ -182,6 +184,7 @@ fn conversation_view(convo: Conversation) -> impl View {
 }
 
 fn handle_switch(v: &mut NamedView<ConversationView>, e: &Event) -> Option<EventResult> {
+    info!("handle switch start");
     if let Event::Mouse {
         event: MouseEvent::Release(MouseButton::Left),
         ..
@@ -194,6 +197,7 @@ fn handle_switch(v: &mut NamedView<ConversationView>, e: &Event) -> Option<Event
                 let exec = executor.clone();
                 let c = convo.clone();
                 tokio::spawn(async move {
+                    info!("it can't be getting here, nothing happens");
                     exec.sender.send(UiEvent::SwitchConversation(c)).await.ok();
                 });
             });

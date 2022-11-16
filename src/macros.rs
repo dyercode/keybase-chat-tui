@@ -5,11 +5,11 @@ mod test {
     macro_rules! conversation {
         ($id:expr) => {{
             KeybaseConversation {
-                id: $id.to_string(),
+                id: $id.to_owned(),
                 unread: false,
                 channel: Channel {
-                    name: "channel".to_string(),
-                    topic_name: "".to_string(),
+                    name: "channel".to_owned(),
+                    topic_name: "".to_owned(),
                     members_type: MemberType::User,
                 },
             }
@@ -19,22 +19,22 @@ mod test {
     #[macro_export]
     macro_rules! message {
         ($convo_id: expr, $text: expr) => {{
-            use crate::types::Sender;
+            use $crate::types::Sender;
             Message {
-                conversation_id: $convo_id.to_string(),
+                conversation_id: $convo_id.to_owned(),
                 content: MessageType::Text {
                     text: MessageBody {
-                        body: $text.to_string(),
+                        body: $text.to_owned(),
                     },
                 },
                 channel: Channel {
-                    name: "channel".to_string(),
-                    topic_name: "".to_string(),
+                    name: "channel".to_owned(),
+                    topic_name: "".to_owned(),
                     members_type: MemberType::User,
                 },
                 sender: Sender {
-                    device_name: "My Device".to_string(),
-                    username: "Some Guy".to_string(),
+                    device_name: "My Device".to_owned(),
+                    username: "Some Guy".to_owned(),
                 },
             }
         }};

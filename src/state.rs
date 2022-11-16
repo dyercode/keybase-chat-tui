@@ -21,6 +21,7 @@
 // of the main UI struct. This is still more coupling than I wanted originally, but it seems to
 // work OK. I'm sure a more experienced Rust developer could design this better!
 
+use anyhow::Result;
 use std::collections::hash_map::Values;
 use std::collections::HashMap;
 
@@ -36,7 +37,7 @@ type ConversationId = String;
 // needed to render in each case.
 #[cfg_attr(test, automock)]
 pub trait StateObserver {
-    fn on_conversation_change(&mut self, data: &Conversation);
+    fn on_conversation_change(&mut self, data: &Conversation) -> Result<()>;
     fn on_conversations_added(&mut self, data: &[Conversation]);
     fn on_message(&mut self, data: &Message, conversation_id: &str, active: bool);
 }
@@ -83,7 +84,7 @@ impl<'a, I: ExactSizeIterator + Iterator<Item = &'a Conversation>> ExactSizeIter
 pub trait ApplicationState {
     fn insert_conversation(&mut self, conversation: Conversation);
     fn insert_message(&mut self, conversation_id: &str, message: Message);
-    fn set_current_conversation(&mut self, conversation_id: &str);
+    fn set_current_conversation(&mut self, conversation_id: &str) -> Result<()>;
     fn get_current_conversation(&self) -> Option<&Conversation>;
     fn set_conversations(&mut self, conversations: Vec<Conversation>);
     fn get_conversations(&self) -> Conversations<Values<'_, String, Conversation>>;
@@ -112,13 +113,16 @@ impl ApplicationState for ApplicationStateInner {
         }
     }
 
-    // should return a result
-    fn set_current_conversation(&mut self, conversation_id: &str) {
+    fn set_current_conversation(&mut self, conversation_id: &str) -> Result<()> {
         if let Some(convo) = self.conversations.get(conversation_id) {
-            self.current_conversation = Some(conversation_id.to_string());
+            self.current_conversation = Some(convo.id.clone());
             self.observers
                 .iter_mut()
-                .for_each(|o| o.on_conversation_change(convo));
+                .map(|o| o.on_conversation_change(convo))
+                .collect::<Result<Vec<()>>>()
+                .map(|_| ())
+        } else {
+            Ok(())
         }
     }
 
@@ -157,6 +161,7 @@ impl ApplicationState for ApplicationStateInner {
     }
 }
 
+#[allow(clippy::unwrap_used, clippy::panic)]
 #[cfg(test)]
 mod test {
     use super::*;
@@ -235,7 +240,7 @@ mod test {
 
         let convo = state.get_conversation("test").unwrap();
 
-        if let MessageType::Text { text } = &convo.messages[0].content {
+        if let MessageType::Text { ref text } = convo.messages[0].content {
             assert_eq!(text.body, "hey");
         } else {
             panic!("Wrong message type");
@@ -245,7 +250,7 @@ mod test {
         let convo = state.get_conversation("test").unwrap();
 
         // message should be prepended
-        if let MessageType::Text { text } = &convo.messages[0].content {
+        if let MessageType::Text { ref text } = convo.messages[0].content {
             assert_eq!(text.body, "there");
         } else {
             panic!("Wrong message type");
@@ -306,38 +311,38 @@ mod test {
         let test_convo2: Conversation = conversation!("test2").into();
 
         let message = Message {
-            conversation_id: "test1".to_string(),
+            conversation_id: "test1".to_owned(),
             content: MessageType::Text {
                 text: MessageBody {
-                    body: "My Message".to_string(),
+                    body: "My Message".to_owned(),
                 },
             },
             channel: Channel {
-                name: "My Channel".to_string(),
-                topic_name: "".to_string(),
+                name: "My Channel".to_owned(),
+                topic_name: "".to_owned(),
                 members_type: MemberType::User,
             },
             sender: Sender {
-                device_name: "My Device".to_string(),
-                username: "Some Guy".to_string(),
+                device_name: "My Device".to_owned(),
+                username: "Some Guy".to_owned(),
             },
         };
 
         let message2 = Message {
-            conversation_id: "test2".to_string(),
+            conversation_id: "test2".to_owned(),
             content: MessageType::Text {
                 text: MessageBody {
-                    body: "My Message 2".to_string(),
+                    body: "My Message 2".to_owned(),
                 },
             },
             channel: Channel {
-                name: "My Channel".to_string(),
-                topic_name: "".to_string(),
+                name: "My Channel".to_owned(),
+                topic_name: "".to_owned(),
                 members_type: MemberType::User,
             },
             sender: Sender {
-                device_name: "My Device".to_string(),
-                username: "Some Guy".to_string(),
+                device_name: "My Device".to_owned(),
+                username: "Some Guy".to_owned(),
             },
         };
 

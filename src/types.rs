@@ -5,7 +5,7 @@
 //
 // A lot of these were just trial and error while using the Keybase API and fixing serialization
 // errors.
-use std::hash::{Hash, Hasher};
+use core::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
@@ -142,7 +142,7 @@ impl Conversation {
     pub fn insert_messages(&mut self, mut messages: Vec<Message>) {
         // assume these are already in time-descending order, so we swap them and then append the
         // older ones
-        std::mem::swap(&mut self.messages, &mut messages);
+        core::mem::swap(&mut self.messages, &mut messages);
         self.messages.extend(messages);
     }
 
@@ -153,7 +153,7 @@ impl Conversation {
                 &self.data.channel.name, &self.data.channel.topic_name
             ),
             // TODO: remove the username from the channel name for display
-            MemberType::User => self.data.channel.name.to_string(),
+            MemberType::User => self.data.channel.name.to_owned(),
         }
     }
 }

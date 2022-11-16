@@ -3,6 +3,7 @@ use tokio::sync::mpsc::Receiver;
 use crate::client::KeybaseClient;
 use crate::state::ApplicationState;
 use crate::types::{KeybaseConversation, ListenerEvent, UiEvent};
+use anyhow::{anyhow, Result};
 
 pub struct Controller<S, C> {
     client: C,
@@ -19,8 +20,12 @@ impl<S: ApplicationState, C: KeybaseClient> Controller<S, C> {
         }
     }
 
-    pub async fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let conversations = self.client.fetch_conversations().await?;
+    pub async fn init(&mut self) -> Result<()> {
+        let conversations = self
+            .client
+            .fetch_conversations()
+            .await
+            .map_err(|_| anyhow!("fetching conversations blew up"))?;
         if let Some(head) = conversations.get(0) {
             let first_id = head.id.clone();
             self.state.set_conversations(
@@ -29,8 +34,8 @@ impl<S: ApplicationState, C: KeybaseClient> Controller<S, C> {
                     .map(KeybaseConversation::into)
                     .collect(),
             );
-            self.state.set_current_conversation(&first_id);
-        }
+            self.state.set_current_conversation(&first_id)?;
+        };
         Ok(())
     }
 
@@ -41,9 +46,9 @@ impl<S: ApplicationState, C: KeybaseClient> Controller<S, C> {
                 msg = client_receiver.recv() => {
                     if let Some(value) = msg {
                         match value {
-                            ListenerEvent::ChatMessage(msg) => {
-                                let conversation_id = &msg.msg.conversation_id;
-                                self.state.insert_message(conversation_id, msg.msg.clone());
+                            ListenerEvent::ChatMessage(message) => {
+                                let conversation_id = &message.msg.conversation_id;
+                                self.state.insert_message(conversation_id, message.msg.clone());
                             }
                         }
                     }
@@ -51,13 +56,14 @@ impl<S: ApplicationState, C: KeybaseClient> Controller<S, C> {
                 msg = self.ui_receiver.recv() => {
                     if let Some(value) = msg {
                         match value {
-                            UiEvent::SendMessage(msg) => {
+                            UiEvent::SendMessage(message) => {
                                 if let Some(convo) = self.state.get_current_conversation() {
                                     let channel = &convo.data.channel;
-                                    self.client.send_message(channel, msg).await?;
+                                    self.client.send_message(channel, message).await?;
                                 }
                             },
                             UiEvent::SwitchConversation(conversation_id) => {
+                                info!("received event to switch conversation {}", conversation_id);
                                 switch_conversation(&mut self.client, &mut self.state, conversation_id).await?;
                             }
                         }
@@ -77,12 +83,15 @@ async fn switch_conversation<S: ApplicationState, C: KeybaseClient>(
         .get_conversation_mut(&conversation_id)
         .filter(|c| !c.fetched)
     {
+        info!("fetching messages for {:?}", &convo.data);
         let messages = client.fetch_messages(&convo.data, 20).await?;
+        info!("fetched messages");
         convo.fetched = true;
         convo.insert_messages(messages);
     }
 
-    state.set_current_conversation(&conversation_id);
+    info!("setting conversation to {}", &conversation_id);
+    state.set_current_conversation(&conversation_id)?;
     Ok(())
 }
 
@@ -143,7 +152,7 @@ mod test {
         controller.init().await.unwrap();
 
         tokio::spawn(async move {
-            s.send(UiEvent::SwitchConversation("test1".to_string()))
+            s.send(UiEvent::SwitchConversation("test1".to_owned()))
                 .await
                 .ok();
         });
